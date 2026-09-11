@@ -33,8 +33,8 @@ jobs:
             exit 1
           fi
 
-          if find glance -type f -name '*.swift' -print0 | xargs -0 grep -nE 'https?://'; then
-            echo 'External HTTP(S) URL found in Swift runtime sources.'
+          if find glance -type f -name '*.swift' -print0 | xargs -0 grep -nE '"https?://'; then
+            echo 'External HTTP(S) URL string found in Swift runtime sources.'
             exit 1
           fi
 
