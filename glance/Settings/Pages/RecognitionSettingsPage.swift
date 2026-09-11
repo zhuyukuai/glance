@@ -78,17 +78,24 @@ struct RecognitionSettingsPage: View {
                 SettingsSectionTitle(text: "Liveness")
                 SettingsGroup {
                     SettingsRowContent(
-                        title: "Liveness detection",
-                        info: "Checks that you're a live person, not a photo. May increase unlock time."
+                        title: "Replay challenge",
+                        info: "Every Face Unlock requires two random actions, selected from blinking, opening your mouth, and turning your head. Actions only count after their prompt appears."
                     ) {
-                        GlanceToggle(isOn: $settings.livenessChecksEnabled)
+                        Text("Required")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(SettingsMetrics.textSecondary)
                     }
                     SettingsGroupDivider()
-                    LivenessModePicker(
-                        selection: $settings.livenessMode,
-                        isEnabled: settings.livenessChecksEnabled
-                    )
+                    SettingsRowContent(
+                        title: "Passive spoof checks",
+                        info: "Screen glare, device edges, face depth/pose, and blink dynamics remain enabled as additional checks."
+                    ) {
+                        Text("Heavy")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(SettingsMetrics.textSecondary)
+                    }
                 }
+                SettingsCaption(text: "These checks are mandatory because a successful Face Unlock can type your real macOS password. They can no longer be disabled from Settings.")
             }
         }
     }
