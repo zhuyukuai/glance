@@ -22,6 +22,9 @@ struct LivenessFrame {
     let yaw: Float?
     let leftEyeAspectRatio: CGFloat?
     let rightEyeAspectRatio: CGFloat?
+    /// Height/width of the inner-lip landmark region (outer lips as fallback). Used only by
+    /// the randomized active replay challenge; relative change matters more than its raw value.
+    let mouthAspectRatio: CGFloat?
     /// `(noseCentroid.x - eyeMidpoint.x) / interocularDistance` — tracks `tan(yaw)` on a real
     /// 3D face but stays constant on any flat presentation. See `poseDepthConsistency` below.
     let noseOffsetRatio: CGFloat?
@@ -35,8 +38,8 @@ struct LivenessFrame {
     /// was available, in which case the `glossGlare` deny cue abstains.
     let glare: GlareSample?
 
-    /// Explicit init so `glare` can default to `nil` — a defaulted `let` property is otherwise
-    /// excluded from Swift's synthesized memberwise init rather than becoming optional.
+    /// Explicit init so newer optional measurements can default to `nil` without forcing every
+    /// synthetic/self-test frame constructor to specify them.
     init(
         timestamp: Date,
         landmarks: [LandmarkPoint],
@@ -47,6 +50,7 @@ struct LivenessFrame {
         noseOffsetRatio: CGFloat?,
         hasReliableLandmarks: Bool,
         deviceOverlapFraction: CGFloat?,
+        mouthAspectRatio: CGFloat? = nil,
         glare: GlareSample? = nil
     ) {
         self.timestamp = timestamp
@@ -55,6 +59,7 @@ struct LivenessFrame {
         self.yaw = yaw
         self.leftEyeAspectRatio = leftEyeAspectRatio
         self.rightEyeAspectRatio = rightEyeAspectRatio
+        self.mouthAspectRatio = mouthAspectRatio
         self.noseOffsetRatio = noseOffsetRatio
         self.hasReliableLandmarks = hasReliableLandmarks
         self.deviceOverlapFraction = deviceOverlapFraction

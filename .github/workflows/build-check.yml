@@ -3,7 +3,8 @@ name: Xcode Build Check
 on:
   push:
     branches:
-      - feat/offline-hardening
+      - main
+      - 'feat/**'
   pull_request:
     branches:
       - main
@@ -49,6 +50,30 @@ jobs:
           fi
 
           echo 'Offline runtime audit passed.'
+
+      - name: Run liveness security self-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COMMON_LIVENESS_SOURCES=(
+            glance/Liveness/LandmarkGeometry.swift
+            glance/Liveness/GeometryLiveness.swift
+            glance/Liveness/GlareCue.swift
+            glance/Liveness/LivenessCues.swift
+            glance/Liveness/LivenessScoring.swift
+          )
+
+          swiftc -O -o "$RUNNER_TEMP/liveness_selftest" \
+            "${COMMON_LIVENESS_SOURCES[@]}" \
+            glance/Liveness/LivenessAnalyzer.swift \
+            tools/liveness_selftest.swift
+          "$RUNNER_TEMP/liveness_selftest"
+
+          swiftc -O -o "$RUNNER_TEMP/replay_challenge_selftest" \
+            "${COMMON_LIVENESS_SOURCES[@]}" \
+            tools/replay_challenge_selftest.swift
+          "$RUNNER_TEMP/replay_challenge_selftest"
 
       - name: Show Xcode version
         run: xcodebuild -version

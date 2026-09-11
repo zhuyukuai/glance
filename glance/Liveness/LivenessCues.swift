@@ -6,6 +6,7 @@
 //  cues override CONFIRM cues unconditionally; a confirm cue's absence is never a failure.
 //
 
+import Foundation
 import CoreGraphics
 
 /// One cue's latest reading. `confidence` 0 is always an abstention, never a reading of
@@ -64,14 +65,13 @@ enum LivenessCue: String, CaseIterable, Hashable, Identifiable {
     }
 }
 
-/// How much liveness checking runs. Both modes always run the deny cues —
-/// the difference is only whether a *positive* proof of life is also
-/// required before unlocking.
+/// How much passive liveness checking runs. Both modes always run the deny cues.
+/// A separate randomized active replay challenge is mandatory before either mode
+/// can confirm in `LivenessAnalyzer`.
 enum LivenessMode: String, CaseIterable, Identifiable, Sendable {
-    /// Deny-only: "confirmed unless proven wrong." Never blocks a user who sits still — the default.
+    /// Deny-only passive checks; the active replay challenge is still required.
     case light
-    /// Deny cues plus at least one confirm cue must fire. Can block a user who holds
-    /// perfectly still and never blinks for the whole scan.
+    /// Deny cues plus at least one passive confirm cue, in addition to the active challenge.
     case heavy
 
     var id: String { rawValue }
@@ -85,8 +85,8 @@ enum LivenessMode: String, CaseIterable, Identifiable, Sendable {
 
     var summary: String {
         switch self {
-        case .light: return "Only rejects obvious spoofs."
-        case .heavy: return "Also requires proof of a real face."
+        case .light: return "Active challenge plus obvious-spoof rejection."
+        case .heavy: return "Active challenge plus an additional passive proof of life."
         }
     }
 }
@@ -117,8 +117,8 @@ struct LivenessTuning: Equatable {
     /// not a ramping level, so one firing frame is the event itself.
     var blinkFrames: Int = 1
 
-    /// Frames Light mode waits before auto-confirming, so deny cues get a fair chance to
-    /// fire first — otherwise a first-frame match could unlock before glare/device ever ran.
+    /// Frames Light mode waits before its passive side becomes ready, so deny cues get a fair
+    /// chance to fire. The active challenge still has to complete before final confirmation.
     var lightModeMinimumFrames: Int = 3
 
     nonisolated static let `default` = LivenessTuning()
@@ -145,10 +145,84 @@ struct LivenessTuning: Equatable {
     }
 }
 
+/// A randomized, ordered challenge-response gate aimed specifically at replayed video.
+/// A generic recording can contain blinks, mouth motion, and head turns, but it must now
+/// contain the two actions selected for this attempt *after* each corresponding prompt,
+/// in the selected order. Each completed step discards its prior frame history so an action
+/// that happened before the prompt cannot satisfy the next prompt retroactively.
+struct ActiveLivenessChallenge {
+    enum Step: String, CaseIterable, Sendable {
+        case blink
+        case openMouth
+        case turnHead
+
+        var prompt: String {
+            switch self {
+            case .blink: return "Blink now"
+            case .openMouth: return "Open your mouth"
+            case .turnHead: return "Turn your head"
+            }
+        }
+    }
+
+    private(set) var steps: [Step]
+    private(set) var currentIndex = 0
+    private var frames: [LivenessFrame] = []
+    private let observationWindow: TimeInterval = 2.5
+
+    init(steps: [Step]) {
+        precondition(!steps.isEmpty)
+        self.steps = steps
+    }
+
+    static func randomized(stepCount: Int = 2) -> ActiveLivenessChallenge {
+        let count = min(max(stepCount, 1), Step.allCases.count)
+        return ActiveLivenessChallenge(steps: Array(Step.allCases.shuffled().prefix(count)))
+    }
+
+    var isComplete: Bool { currentIndex >= steps.count }
+    var prompt: String? { isComplete ? nil : steps[currentIndex].prompt }
+    var currentStep: Step? { isComplete ? nil : steps[currentIndex] }
+
+    /// Returns true only when this frame completes the current step.
+    mutating func observe(_ frame: LivenessFrame) -> Bool {
+        guard let step = currentStep else { return false }
+        frames.append(frame)
+        frames.removeAll { frame.timestamp.timeIntervalSince($0.timestamp) > observationWindow }
+
+        let satisfied: Bool
+        switch step {
+        case .blink:
+            let reading = LivenessScoring.blinkDynamics(frames)
+            satisfied = reading.confidence > 0 && reading.level >= 0.5
+
+        case .openMouth:
+            let ratios = frames.compactMap(\.mouthAspectRatio)
+            guard ratios.count >= 4, let low = ratios.min(), let high = ratios.max(), low > 0 else {
+                return false
+            }
+            // Relative change handles different lip shapes; the absolute delta keeps detector
+            // jitter from satisfying the challenge when the baseline ratio is very small.
+            satisfied = high / low >= 1.45 && high - low >= 0.08
+
+        case .turnHead:
+            // Reuse the real 3D pose signal instead of yaw alone. The range gate inside
+            // poseDepthConsistency also prevents tiny Vision yaw quantization from passing.
+            let reading = LivenessScoring.poseDepthConsistency(frames)
+            satisfied = reading.confidence > 0 && reading.level >= LivenessTuning.default.depthPoseLevel
+        }
+
+        guard satisfied else { return false }
+        currentIndex += 1
+        frames.removeAll(keepingCapacity: true)
+        return true
+    }
+}
+
 enum LivenessDecision: Equatable {
     /// Nothing decided yet. Not a failure — the scan should keep going.
     case pending
-    /// Cue is `nil` when Light mode auto-confirmed rather than any cue firing.
+    /// Cue is `nil` when Light mode's passive side auto-confirmed rather than any cue firing.
     case confirmed(by: LivenessCue?)
     case denied(by: LivenessCue)
 
@@ -196,9 +270,9 @@ struct LivenessSnapshot: Equatable {
     }
 }
 
-/// The stateful decision core, kept as a plain `struct` rather than folded
-/// into `LivenessAnalyzer` so `tools/liveness_selftest.swift` can drive the
-/// real firing/latching logic frame by frame with no actor or camera.
+/// The stateful passive-decision core, kept as a plain `struct` rather than folded
+/// into `LivenessAnalyzer` so standalone self-tests can drive the real firing/latching
+/// logic frame by frame with no actor or camera.
 struct LivenessEvaluator {
     var mode: LivenessMode
     var tuning: LivenessTuning
