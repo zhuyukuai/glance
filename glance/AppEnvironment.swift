@@ -23,6 +23,13 @@ final class AppEnvironment {
     var isDebugSectionRevealed = false
 
     init() {
+        // Face Unlock is a privileged path because a successful match ultimately types the real
+        // macOS password. Keep both passive liveness and its stricter mode mandatory even for
+        // users upgrading from an older build that persisted weaker/off settings.
+        GlanceSettings.shared.livenessChecksEnabled = true
+        GlanceSettings.shared.livenessMode = .heavy
+        _ = ActiveChallengePromptPresenter.shared
+
         faceUnlockCoordinator = FaceUnlockCoordinator(pocController: pocController)
         sessionAutoLocker = SessionAutoLocker(pocController: pocController)
     }
