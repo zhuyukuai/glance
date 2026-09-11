@@ -29,6 +29,7 @@ nonisolated enum LivenessFeatureExtractor {
                 noseOffsetRatio: nil,
                 hasReliableLandmarks: false,
                 deviceOverlapFraction: deviceOverlap,
+                mouthAspectRatio: nil,
                 glare: glare
             )
         }
@@ -38,6 +39,9 @@ nonisolated enum LivenessFeatureExtractor {
         let interocular = LandmarkGeometry.interocularDistance(from: landmarks, imageSize: imageSize)
         let leftEAR = landmarks.leftEye.flatMap { LandmarkGeometry.eyeAspectRatio(of: $0, imageSize: imageSize) }
         let rightEAR = landmarks.rightEye.flatMap { LandmarkGeometry.eyeAspectRatio(of: $0, imageSize: imageSize) }
+        let mouthAspect = (landmarks.innerLips ?? landmarks.outerLips).flatMap {
+            boundingBoxAspectRatio(of: $0, imageSize: imageSize)
+        }
 
         let eyeLeft = LandmarkGeometry.eyeCenter(pupil: landmarks.leftPupil, eye: landmarks.leftEye, imageSize: imageSize)
         let eyeRight = LandmarkGeometry.eyeCenter(pupil: landmarks.rightPupil, eye: landmarks.rightEye, imageSize: imageSize)
@@ -58,7 +62,23 @@ nonisolated enum LivenessFeatureExtractor {
             noseOffsetRatio: noseOffsetRatio,
             hasReliableLandmarks: result.alignmentTier == .fivePoint,
             deviceOverlapFraction: deviceOverlap,
+            mouthAspectRatio: mouthAspect,
             glare: glare
         )
+    }
+
+    /// Height/width of a Vision landmark region. The replay challenge only compares
+    /// this value across frames, so per-user lip geometry cancels out.
+    private static func boundingBoxAspectRatio(
+        of region: VNFaceLandmarkRegion2D, imageSize: CGSize
+    ) -> CGFloat? {
+        let points = LandmarkGeometry.imagePoints(of: region, imageSize: imageSize)
+        guard points.count >= 3,
+              let minX = points.map(\.x).min(), let maxX = points.map(\.x).max(),
+              let minY = points.map(\.y).min(), let maxY = points.map(\.y).max()
+        else { return nil }
+        let width = maxX - minX
+        guard width > 0 else { return nil }
+        return (maxY - minY) / width
     }
 }
