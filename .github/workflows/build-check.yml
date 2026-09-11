@@ -21,6 +21,37 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Audit runtime sources for network access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -d '' swift_files < <(find glance -type f -name '*.swift' -print0)
+
+          forbidden_runtime='URLSession|URLRequest|NSURLConnection|import[[:space:]]+Network|NWConnection|NWListener|NWBrowser|NWPathMonitor|CFNetwork|CFSocket|CFStreamCreatePairWithSocketToHost|Darwin\.(socket|connect)|getaddrinfo|import[[:space:]]+WebKit|WKWebView|import[[:space:]]+Sparkle|Alamofire|Starscream|Sentry|PostHog|Mixpanel|Firebase|Amplitude|Datadog|/usr/bin/curl|/usr/bin/wget'
+
+          if grep -nE "$forbidden_runtime" "${swift_files[@]}"; then
+            echo 'Forbidden runtime networking primitive or telemetry/update dependency found in Swift sources.'
+            exit 1
+          fi
+
+          if grep -nE 'https?://' "${swift_files[@]}"; then
+            echo 'External HTTP(S) URL found in Swift runtime sources.'
+            exit 1
+          fi
+
+          if grep -nE 'com\.apple\.security\.network\.(client|server)' glance/*.entitlements; then
+            echo 'Network client/server entitlement found.'
+            exit 1
+          fi
+
+          if grep -nE '<key>SU(FeedURL|PublicEDKey|AutomaticallyUpdate|EnableInstallerLauncherService)</key>' glance/*.plist; then
+            echo 'Sparkle network/update plist configuration found.'
+            exit 1
+          fi
+
+          echo 'Offline runtime audit passed.'
+
       - name: Show Xcode version
         run: xcodebuild -version
 
