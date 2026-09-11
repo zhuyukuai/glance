@@ -26,16 +26,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -d '' swift_files < <(find glance -type f -name '*.swift' -print0)
-
           forbidden_runtime='URLSession|URLRequest|NSURLConnection|import[[:space:]]+Network|NWConnection|NWListener|NWBrowser|NWPathMonitor|CFNetwork|CFSocket|CFStreamCreatePairWithSocketToHost|Darwin\.(socket|connect)|getaddrinfo|import[[:space:]]+WebKit|WKWebView|import[[:space:]]+Sparkle|Alamofire|Starscream|Sentry|PostHog|Mixpanel|Firebase|Amplitude|Datadog|/usr/bin/curl|/usr/bin/wget'
 
-          if grep -nE "$forbidden_runtime" "${swift_files[@]}"; then
+          if find glance -type f -name '*.swift' -print0 | xargs -0 grep -nE "$forbidden_runtime"; then
             echo 'Forbidden runtime networking primitive or telemetry/update dependency found in Swift sources.'
             exit 1
           fi
 
-          if grep -nE 'https?://' "${swift_files[@]}"; then
+          if find glance -type f -name '*.swift' -print0 | xargs -0 grep -nE 'https?://'; then
             echo 'External HTTP(S) URL found in Swift runtime sources.'
             exit 1
           fi
