@@ -1,0 +1,67 @@
+name: Xcode Build Check
+
+on:
+  push:
+    branches:
+      - feat/offline-hardening
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (macOS 15, unsigned)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Audit runtime sources for network access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          forbidden_runtime='URLSession|URLRequest|NSURLConnection|import[[:space:]]+Network|NWConnection|NWListener|NWBrowser|NWPathMonitor|CFNetwork|CFSocket|CFStreamCreatePairWithSocketToHost|Darwin\.(socket|connect)|getaddrinfo|import[[:space:]]+WebKit|WKWebView|import[[:space:]]+Sparkle|Alamofire|Starscream|Sentry|PostHog|Mixpanel|Firebase|Amplitude|Datadog|/usr/bin/curl|/usr/bin/wget'
+
+          if find glance -type f -name '*.swift' -print0 | xargs -0 grep -nE "$forbidden_runtime"; then
+            echo 'Forbidden runtime networking primitive or telemetry/update dependency found in Swift sources.'
+            exit 1
+          fi
+
+          if find glance -type f -name '*.swift' -print0 | xargs -0 grep -nE '"https?://'; then
+            echo 'External HTTP(S) URL string found in Swift runtime sources.'
+            exit 1
+          fi
+
+          if grep -nE 'com\.apple\.security\.network\.(client|server)' glance/*.entitlements; then
+            echo 'Network client/server entitlement found.'
+            exit 1
+          fi
+
+          if grep -nE '<key>SU(FeedURL|PublicEDKey|AutomaticallyUpdate|EnableInstallerLauncherService)</key>' glance/*.plist; then
+            echo 'Sparkle network/update plist configuration found.'
+            exit 1
+          fi
+
+          echo 'Offline runtime audit passed.'
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build without code signing
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project glance.xcodeproj \
+            -scheme glance \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build

@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import AppKit
 
 struct AboutSettingsPage: View {
     @Bindable var updater: UpdaterController
@@ -44,37 +43,14 @@ struct AboutSettingsPage: View {
             Text(versionString)
                 .font(.system(size: 12))
                 .foregroundStyle(SettingsMetrics.textSecondary)
+
+            Text("Strict offline mode")
+                .font(.system(size: 11))
+                .foregroundStyle(SettingsMetrics.textSecondary)
+                .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, 16)
-
-        SettingsGroup {
-            SettingsActionRowContent(
-                title: "Check for Updates",
-                buttonTitle: "Check",
-                isEnabled: updater.canCheckForUpdates
-            ) {
-                updater.checkForUpdates()
-            }
-
-            SettingsGroupDivider()
-
-            SettingsRowContent(title: "Automatically check for updates") {
-                GlanceToggle(isOn: $updater.automaticallyChecksForUpdates)
-            }
-
-            SettingsGroupDivider()
-
-            SettingsActionRowContent(
-                title: "Send Feedback",
-                buttonTitle: "Send"
-            ) {
-                // TODO: point this at the real feedback destination once one exists.
-                if let url = URL(string: "https://tryglance.app/feedback") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-        }
     }
 
     private func handleIconTap() {
