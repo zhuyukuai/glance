@@ -1,0 +1,38 @@
+name: Xcode Build Check
+
+on:
+  push:
+    branches:
+      - feat/offline-hardening
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (macOS 15, unsigned)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build without code signing
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project glance.xcodeproj \
+            -scheme glance \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
