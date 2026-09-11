@@ -6,6 +6,7 @@
 //  cues override CONFIRM cues unconditionally; a confirm cue's absence is never a failure.
 //
 
+import Foundation
 import CoreGraphics
 
 /// One cue's latest reading. `confidence` 0 is always an abstention, never a reading of
