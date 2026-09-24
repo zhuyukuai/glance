@@ -13,8 +13,8 @@ final class SessionAutoLocker {
     private let pocController: POCController
     private var timer: Timer?
 
-    /// Coarse on purpose — the shortest selectable limit is a full day, and the decision compares timestamps, not ticks.
-    private let checkInterval: TimeInterval = 5 * 60
+    /// Refreshes UI state; the credential manager enforces expiry on every key access.
+    private let checkInterval: TimeInterval = 30
 
     init(pocController: POCController) {
         self.pocController = pocController
@@ -41,16 +41,9 @@ final class SessionAutoLocker {
         timer?.invalidate()
     }
 
-    /// Routed through `POCController.lockSession()` rather than `SecureCredentialManager` directly, so the Settings UI's
-    /// `isSessionUnlocked` flag doesn't go stale.
+    /// The credential manager clears an expired key; refresh the settings view as well.
     func evaluate() {
-        guard SecureCredentialManager.isSessionUnlocked,
-              let lastActivityAt = SecureCredentialManager.lastActivityAt
-        else { return }
-
-        let idleLimit = GlanceSettings.shared.autoLockInterval.duration
-        guard Date().timeIntervalSince(lastActivityAt) >= idleLimit else { return }
-
-        pocController.lockSession()
+        _ = SecureCredentialManager.isSessionUnlocked
+        pocController.refreshCredentialStatus()
     }
 }

@@ -38,7 +38,7 @@ extension Notification.Name {
     /// Fires whenever the cached session key changes, so anything encrypted under it (e.g. `FaceEnrollmentStore`) can reload
     /// itself instead of relying on each call site to remember to — a past bug had the sidebar's unlock forget this, leaving
     /// face unlock silently running on stale pre-unlock data.
-    static let secureCredentialSessionDidChange = Notification.Name("SecureCredentialManager.sessionDidChange")
+    nonisolated static let secureCredentialSessionDidChange = Notification.Name("SecureCredentialManager.sessionDidChange")
 }
 
 enum SecureCredentialManager {
@@ -49,13 +49,14 @@ enum SecureCredentialManager {
 
     nonisolated private static let sessionLock = NSLock()
     nonisolated(unsafe) private static var _cachedKey: SymmetricKey?
-    /// Last unlock or successful `readPassword` — what `SessionAutoLocker` compares against the idle limit. Guarded by
+    nonisolated(unsafe) private static var _lifetime: CredentialSessionLifetime?
+    nonisolated(unsafe) private static var _idleTimeout: TimeInterval = 60 * 60
+    /// Last unlock or successful `readPassword`, retained for diagnostics. Guarded by
     /// `sessionLock` alongside the key so the two can never be observed out of step.
     nonisolated(unsafe) private static var _lastActivityAt: Date?
 
     nonisolated static var isSessionUnlocked: Bool {
-        sessionLock.lock(); defer { sessionLock.unlock() }
-        return _cachedKey != nil
+        cachedKey() != nil
     }
 
     /// `nil` whenever the session is locked — there is no activity to age.
@@ -65,14 +66,24 @@ enum SecureCredentialManager {
     }
 
     nonisolated private static func cachedKey() -> SymmetricKey? {
-        sessionLock.lock(); defer { sessionLock.unlock() }
-        return _cachedKey
+        sessionLock.lock()
+        let expired = _cachedKey != nil && !(_lifetime?.isValid(idleLimit: _idleTimeout) ?? false)
+        if expired {
+            _cachedKey = nil
+            _lifetime = nil
+            _lastActivityAt = nil
+        }
+        let result = _cachedKey
+        sessionLock.unlock()
+        if expired { NotificationCenter.default.post(name: .secureCredentialSessionDidChange, object: nil) }
+        return result
     }
 
     nonisolated private static func setCachedKey(_ key: SymmetricKey?) {
         sessionLock.lock()
         let changed = (key != nil) != (_cachedKey != nil)
         _cachedKey = key
+        _lifetime = key == nil ? nil : CredentialSessionLifetime()
         _lastActivityAt = key == nil ? nil : Date()
         sessionLock.unlock()
         // Posted after releasing the lock — observers may call back into `isSessionUnlocked` (re-acquiring it) from a
@@ -81,11 +92,21 @@ enum SecureCredentialManager {
         NotificationCenter.default.post(name: .secureCredentialSessionDidChange, object: nil)
     }
 
-    /// Resets the idle countdown on each successful use, so an actively-used session never auto-locks.
+    /// Successful use extends idle time but never the absolute authorization lifetime.
     nonisolated private static func recordActivity() {
         sessionLock.lock()
-        if _cachedKey != nil { _lastActivityAt = Date() }
+        if _cachedKey != nil {
+            _lastActivityAt = Date()
+            _lifetime?.recordUse()
+        }
         sessionLock.unlock()
+    }
+
+    nonisolated static func setIdleTimeout(_ seconds: TimeInterval) {
+        sessionLock.lock()
+        _idleTimeout = min(max(seconds, 15 * 60), 8 * 60 * 60)
+        sessionLock.unlock()
+        _ = cachedKey() // Apply a shortened preference immediately.
     }
 
     // MARK: - Generic session-key crypto (shared by passwords here and face embeddings in SecureFaceStore; requires an unlocked session)

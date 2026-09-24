@@ -2,12 +2,14 @@
 //  KeystrokeInjector.swift
 //  glance
 //
-//  Synthesizes keystrokes via CGEvent, posted at the HID tap so they reach the lock screen's secure text field.
+//  Delivers credentials only to a verified system loginwindow process while locked.
 //
 
 import Foundation
 import ApplicationServices
 import CoreGraphics
+import AppKit
+import Darwin
 
 enum KeystrokeError: LocalizedError {
     case accessibilityNotGranted
@@ -37,50 +39,67 @@ enum KeystrokeInjector {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    /// Types the UTF-8 bytes into whatever has keyboard focus, then presses Return. Takes `Data` rather than `String` so the
-    /// caller can hold the plaintext as a zero-able buffer; the brief internal `String` decode is scoped to this call. Blocking.
-    nonisolated static func typeAndReturn(_ passwordBytes: Data) throws {
-        guard isAccessibilityTrusted() else {
-            throw KeystrokeError.accessibilityNotGranted
-        }
-        guard let text = String(data: passwordBytes, encoding: .utf8) else {
-            throw KeystrokeError.eventCreationFailed
-        }
-        let source = CGEventSource(stateID: .hidSystemState)
-        for char in text {
-            try postUnicode(String(char), source: source)
-        }
-        try postReturn(source: source)
-    }
-
-    /// Per-character Unicode injection — bypasses keyboard layout issues.
-    private nonisolated static func postUnicode(_ unicode: String, source: CGEventSource?) throws {
-        let utf16 = Array(unicode.utf16)
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
-            throw KeystrokeError.eventCreationFailed
-        }
-        utf16.withUnsafeBufferPointer { buf in
-            if let base = buf.baseAddress {
-                keyDown.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: base)
-                keyUp.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: base)
+    /// Targets only the verified system loginwindow. There is deliberately no global-HID
+    /// fallback: if this route is unsupported on an OS release, manual login is required.
+    nonisolated static func typeAndReturn(_ passwordBytes: Data, target: LockScreenTarget,
+                                         attempt: UnlockAttempt) throws {
+        guard isAccessibilityTrusted() else { throw KeystrokeError.accessibilityNotGranted }
+        let source = CGEventSource(stateID: .privateState)
+        try PasswordDelivery.run(passwordBytes, validate: {
+            attempt.isValid && SecureCredentialManager.isSessionUnlocked
+                && isAccessibilityTrusted() && target.isCurrent
+        }, post: { event in
+            let key: CGKeyCode
+            let down: Bool
+            let text: String?
+            switch event {
+            case .character(let value, let keyDown):
+                key = 0; down = keyDown; text = keyDown ? value : nil
+            case .enter(let keyDown):
+                key = 0x24; down = keyDown; text = nil
             }
-        }
-        keyDown.post(tap: .cghidEventTap)
-        Thread.sleep(forTimeInterval: 0.012)
-        keyUp.post(tap: .cghidEventTap)
-        Thread.sleep(forTimeInterval: 0.012)
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down) else {
+                throw KeystrokeError.eventCreationFailed
+            }
+            event.flags = []
+            if let text {
+                var utf16 = Array(text.utf16)
+                defer { for i in utf16.indices { utf16[i] = 0 } }
+                utf16.withUnsafeBufferPointer { buffer in
+                    event.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+                }
+            }
+            // Recheck after event construction as well as before it. postToPid prevents
+            // a focus transition from redirecting credentials to an editor or terminal.
+            guard attempt.isValid, target.isCurrent, SecureCredentialManager.isSessionUnlocked else {
+                throw PasswordDeliveryError.invalidContext
+            }
+            event.postToPid(target.pid)
+            Thread.sleep(forTimeInterval: 0.012)
+        })
+    }
+}
+
+nonisolated struct LockScreenTarget: Sendable {
+    let pid: pid_t
+    let consoleSet: UInt32
+    private static let executable = "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow"
+
+    @MainActor static func resolve() -> Self? {
+        guard let consoleSet = LockMonitor.lockedConsoleSet() else { return nil }
+        let candidates = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.loginwindow")
+            .filter { !$0.isTerminated && $0.executableURL?.path == executable }
+        guard candidates.count == 1, let app = candidates.first else { return nil }
+        let target = Self(pid: app.processIdentifier, consoleSet: consoleSet)
+        return target.isCurrent ? target : nil
     }
 
-    /// Physical Return key (virtual key 0x24).
-    private nonisolated static func postReturn(source: CGEventSource?) throws {
-        let returnKey: CGKeyCode = 0x24
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: returnKey, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: returnKey, keyDown: false) else {
-            throw KeystrokeError.eventCreationFailed
+    var isCurrent: Bool {
+        guard LockMonitor.lockedConsoleSet() == consoleSet else { return false }
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let count = path.withUnsafeMutableBytes { buffer in
+            proc_pidpath(pid, buffer.baseAddress, UInt32(buffer.count))
         }
-        keyDown.post(tap: .cghidEventTap)
-        Thread.sleep(forTimeInterval: 0.012)
-        keyUp.post(tap: .cghidEventTap)
+        return count > 0 && String(cString: path) == Self.executable
     }
 }

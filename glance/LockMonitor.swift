@@ -129,4 +129,25 @@ final class LockMonitor {
         }
         return (dict["CGSSessionScreenIsLocked"] as? Bool) ?? false
     }
+    /// Unlike !isScreenActuallyLocked(), a failed session query is not proof of unlock.
+    nonisolated static func isScreenActuallyUnlocked() -> Bool {
+        guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any],
+              dict[kCGSessionOnConsoleKey as String] as? Bool == true,
+              let uid = dict[kCGSessionUserIDKey as String] as? NSNumber,
+              uid.uint32Value == geteuid() else { return false }
+        return !(dict["CGSSessionScreenIsLocked"] as? Bool ?? false)
+    }
+
+    /// Refuse fast-user-switched/background sessions and unknown dictionary shapes.
+    nonisolated static func lockedConsoleSet() -> UInt32? {
+        guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any],
+              dict["CGSSessionScreenIsLocked"] as? Bool == true,
+              dict[kCGSessionOnConsoleKey as String] as? Bool == true,
+              dict[kCGSessionLoginDoneKey as String] as? Bool == true,
+              let uid = dict[kCGSessionUserIDKey as String] as? NSNumber,
+              uid.uint32Value == geteuid(),
+              let console = dict[kCGSessionConsoleSetKey as String] as? NSNumber else { return nil }
+        return console.uint32Value
+    }
+
 }

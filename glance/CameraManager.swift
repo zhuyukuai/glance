@@ -18,6 +18,7 @@ enum CameraPermission {
 /// `source` is a `CIImage` — a lazy recipe, not rendered pixels — so holding onto it costs nothing until `renderCrop` uses it.
 struct CameraFrame {
     let id: UInt64
+    let capturedAt: Date
     let image: CGImage
     let source: CIImage
     let sourceSize: CGSize
@@ -67,6 +68,7 @@ final class CameraManager: NSObject {
         errorMessage = nil
         configureSessionIfNeeded()
         reconcileDeviceIfNeeded()
+        guard errorMessage == nil else { return }
 
         sessionQueue.async { [session] in
             if !session.isRunning {
@@ -229,6 +231,7 @@ final class CameraManager: NSObject {
             nextFrameID &+= 1
             let frame = CameraFrame(
                 id: nextFrameID,
+                capturedAt: Date(),
                 image: cgImage,
                 source: sourceImage,
                 sourceSize: sourceExtent.size

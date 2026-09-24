@@ -1,182 +1,110 @@
-<h1 align="center">
-  <br>
-  <a href="https://tryglance.app"><img src="glance/Assets.xcassets/appicon.imageset/appicon.png" alt="Glance" width="150"></a>
-  <br>
-  Glance
-  <br>
-</h1>
+# Glance — offline fork
 
-<h3 align="center">Face unlock for your Mac</h3>
+Camera-assisted lock-screen unlock for macOS, forked from [jonnyoo/glance](https://github.com/jonnyoo/glance).
+This repository adds mandatory active challenges, continuous identity checks, bounded credential sessions,
+and guarded password delivery. It disables automatic updates and removes the update framework dependency.
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-black.svg" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/macOS-15%2B-black.svg" alt="macOS 15+">
-  <img src="https://img.shields.io/badge/Swift-SwiftUI-black.svg" alt="Swift">
-</p>
-
-Glance brings the FaceID-like experience of your iPhone to a Mac near you. Unlock your Mac with a glance — no typing, no reaching for the TouchID key. Everything runs on-device using Apple's Vision
-and Core ML frameworks, so your face data and your Mac password never touch the internet. The UI is built into your Macbook's notch with fluid dynamic island like animations.
-
-
-https://github.com/user-attachments/assets/77438826-80a9-4ab2-9fc3-42407a2d0adb
-
-
----
-
-> [!WARNING]
-> ## Read before downloading
-> ## Glance is not as secure as Apple's FaceID or TouchID
-> 
-> MacBooks don't come equipped with the depth sensors that make iPhone FaceID trustworthy and secure. An
-> iPhone builds a 3D map of your face; a MacBook webcam sees a flat 2D image. That means:
-> 
-> - Glance defeats, with reasonable confidence, a printed photo and a photo on a phone screen (heavy liveness detection must be turned on)
-> - Glance does not reliably defeat a video of you
-> - macOS has no API that lets a third-party app authorize a login, so Glance unlocks by typing
->   your stored password on the lock screen
-> 
-> Glance is a convenience feature, not a security upgrade. Only continue if you accept the tradeoff.
+> **Experimental convenience feature. This is not Apple Face ID or a security upgrade over Touch ID.**
+> A normal RGB webcam does not provide a trusted depth sensor or a trusted video capture path.
+> Photos, replayed/edited video, virtual cameras and generated video remain threats. Passing synthetic
+> regression tests does not establish a real-world spoof rejection rate.
+>
+> Glance stores your actual Mac login password, encrypted behind a user-presence-gated Keychain key.
+> Once authorized, the running process can decrypt that password until the session expires.
+> Do not use a valuable account until the target Mac/camera has passed the [manual acceptance tests](docs/security-testing.md).
 
 ## Installation
 
-**Requirements:**
-- macOS 15 Sequoia or later
-- Apple Silicon or Intel Mac
+Requirements: macOS 15+, Apple Silicon or Intel, a macOS-supported camera, and **full Xcode 26+** to build.
+Command Line Tools alone cannot build the complete application. The source supports built-in, external,
+and Continuity cameras, but individual cameras and OS versions still require testing.
 
-<a href="https://github.com/jonnyoo/glance/releases/latest/download/Glance.dmg" target="_self"><img width="200" src="https://github.com/user-attachments/assets/cdb8af97-1ee2-4669-b7cb-dcfb56c9dd61" alt="Download for Mac" /></a>
+**No notarized release of this hardened fork is currently provided.** Successful push builds in
+[Actions](https://github.com/zhuyukuai/glance/actions) provide a seven-day `glance-test-universal`
+artifact for hardware testing. It contains an ad-hoc signed app, its source commit and SHA-256 checksum.
+This test signature has camera access but no provisioned keychain sharing group; use a disposable macOS
+account. An upstream Glance DMG is not a build of this fork. To build locally, select the reviewed commit
+or branch:
 
-Open the `.dmg` file and drag Glance to `/Applications`, then open it.
+```bash
+git clone https://github.com/zhuyukuai/glance.git
+cd glance
+open glance.xcodeproj
+```
 
+In Xcode, select the `glance` scheme and your own signing team. The project still has development signing
+identifiers from upstream; use a consistent signing identity for subsequent local builds so Keychain and
+macOS permissions remain associated with the same app. Do not grant additional entitlements to work
+around a failed lock-screen test.
 
-## Permissions
+Build and run, then:
 
-| Permission | Why |
-|---|---|
-| **Camera** | To see your face. Frames are processed in memory and never written to disk. |
-| **Accessibility** | To type your password into the lock screen. |
-| **Touch ID** | Gates the key that encrypts your face data and password. |
+1. Start in a disposable macOS account. The first-run flow requires **Camera** and **Accessibility**
+   permissions, face enrollment and a saved password before full Settings and Face Lab become available.
+2. Follow enrollment, authorize a credential session using the system prompt, and save only the password
+   for the **currently signed-in test account**. Do not put your primary account's password into a test build.
+3. In Settings, select the intended physical camera. Use Face Lab to check detection, lighting, pose
+   direction and recognition. Before first-run setup, QuickTime can check camera preview without credentials.
+4. If enabling the optional space-key trigger, grant **Input Monitoring** separately.
+5. Lock the test account, keep your face still until prompted, and perform each requested action.
 
-## How it works
+Glance must already be running in the signed-in user's session. It does **not** unlock FileVault at boot
+or replace the initial login after a restart. If the app/session is unavailable, use the normal password
+or Touch ID. Do not disable FileVault or other macOS protections to make Glance work.
 
-1. Launch the app and follow the onboarding to enroll your face. Glance guides you through capturing your face, turning your head in nine
-   directions. Each frame becomes a 512-number *embedding* — a mathematical fingerprint — and the
-   image is thrown away.
-2. Enter your Mac password once, encrypted behind Touch ID.
-3. When your Mac locks or wakes from sleep, the animation appears in the notch and starts searching for a face.
-4. If it's you — and the liveness checks agree you're a real person — Glance types the
-   password and you're in.
+## Unlock policy
 
-## Features
+- Heavy passive spoof checks are mandatory in the actual unlock path, independently of mutable preferences.
+- Three randomly ordered actions are selected from blink, open mouth, turn left and turn right.
+  Every action starts with a fresh neutral hold, followed by a prompt, a response deadline and a return
+  to neutral. Incorrect/early actions fail the scan; a generic motion sequence is not simply waited out.
+- Only the same continuously recognized enrolled identity can advance the challenge. Missing faces,
+  identity changes, large tracking jumps, stale frames or camera stalls terminate the attempt.
+- At most **three scans per lock session**, including retries/cancelled scans. Actual manual unlock
+  resets this budget; wake events do not. A scan takes up to 8–20 seconds (15 by default).
+- Password events are sent only to the verified system `loginwindow` process for the active locked
+  console session. The process/session, authorization and cancellation token are checked repeatedly.
+  There is **no global keyboard/HID fallback**. Some macOS versions may reject this targeted route;
+  use manual login if unlock cannot be confirmed. Password delivery failures are not automatically retried.
+- Credential sessions default to **one hour idle**, configurable from 15 minutes to 8 hours. Every
+  authorization expires after **8 hours total**, even with repeated face unlocks. Expiry is enforced
+  on key access using a monotonic clock that includes sleep. Old day-based settings migrate to one hour.
 
-| Feature | Description |
-|---|---|
-| **Face unlock** | Triggers on wake, on lock, or on pressing space at the lock screen. Pick any combination. |
-| **Multiple identities** | Enroll several people, or several versions of yourself — with glasses, a beard, different lighting. Toggle any of them off without deleting. |
-| **Liveness checks** | Watches for the motion and reflections that separate a real face from a photo. *Light* or *Heavy* strictness, or off. |
-| **Notch UI** | A closed pill that expands into a scan animation with success and failure states. Hover to retry — or turn animations off entirely and Glance stays invisible. |
-| **Camera & display** | Choose which camera to use, including different cameras for the built-in display vs. an external monitor. |
-| **Auto-locking sessions** | The Touch ID session re-locks itself after an idle period you choose, so an unattended Mac doesn't stay authorized forever. |
-| **Trackpad haptics** | Hovering over the notch will trigger haptics |
-| **Notchless Mac support** | Macs without a notch will be replaced with a pill-shape, dynamic island style design. |
-| **Your data, your call** | Edit or delete your enrolment or stored password at any time. The encrypted files are removed immediately. |
+The lock-screen prompt uses private SkyLight APIs. Their availability and the targeted keyboard route
+must be checked on each supported macOS version. Build success does not prove lock-screen compatibility.
 
----
+## Privacy and storage
 
-# Privacy and Security
+Face recognition and liveness extraction use local Vision/Core ML processing. The application does not
+save camera frames. Enrolled face embeddings are encrypted with AES-GCM; the Mac password is stored as
+an encrypted Keychain item. Its AES key requires user presence when a credential session is authorized.
+Deleting the password from Settings also removes face enrollment.
 
-Glance is designed to keep biometric data and credentials on-device.
+This fork has no automatic updater, update feed, telemetry or remote Swift package dependency. CI scans
+runtime sources for known networking primitives. **This is source-level hardening, not an OS-enforced
+network block:** App Sandbox is disabled for lock-screen integration. Audit the final signed app and its
+runtime traffic if a strict offline deployment is required. Build tooling and model conversion can use
+the network; neither runs during normal recognition.
 
-### Face data
+## Tests
 
-Glance never stores camera images. During enrollment, each captured face is converted into a **512-dimensional embedding** using an ArcFace-based Core ML model. The original frame is then discarded.
+```bash
+bash tools/run_security_tests.sh
+```
 
-Embeddings are stored locally and encrypted with **AES-GCM**.
+The suite exercises passive cues, all 24 three-action permutations, the previously accepted fixed replay
+(with and without a neutral prefix), wrong/early actions, deadlines, identity continuity, attempt budgets,
+credential expiry and cancellation at every password-output boundary. Tests do not access a camera,
+read credentials or post keyboard events. CI also builds the complete unsigned application with Xcode.
+See [security testing and remaining limits](docs/security-testing.md) for required device testing.
 
-### Credentials
+Face Lab: Settings → About → click the app icon five times. Its experimental cue settings do not weaken
+the real unlock policy, and its analyzer does not control the lock-screen prompt.
 
-Your Mac password is stored as encrypted data and is never written to disk in plaintext. The encryption key is a **256-bit AES key stored in the macOS Keychain**, protected by `userPresence` — requiring Touch ID or your device password.
+## Acknowledgements and license
 
-The key is only held in memory while an authorized Glance session is active.
+- [Jonathan Zhou / original Glance](https://github.com/jonnyoo/glance)
+- [The Boring Notch](https://github.com/TheBoredTeam/boring.notch)
+- [InsightFace](https://github.com/deepinsight/insightface) — ArcFace model; see the model provider's usage terms.
 
-### Unlock pipeline
-
-Glance won't type your password simply because a face matches. An unlock requires all of the following:
-
-1. A valid Glance session is authorized.
-2. The Mac is actually at the lock screen.
-3. An enabled identity matches above the configured similarity threshold.
-4. Liveness checks accept the detected face.
-5. Accessibility permission is available to enter the password.
-
-Face recognition and liveness detection run independently and must both succeed before the password is entered. 
-
-### Local by design
-
-Face recognition, face enrollment, and liveness detection run entirely on-device using Vision and Core ML. Glance does not send face data, camera frames, or credentials to a server.
-
-
-### How it tells a face from a photo
-
-Five independent cues over a rolling ~2s window, in two roles:
-
-- **Deny cues** are evidence of a spoof — screen glare, or a device-shaped rectangle framing the
-face. Either one fails the scan outright and overrides anything else.
-- **Confirm cues** are evidence of a real face — flat-vs-3D landmark geometry, nose parallax
-across head turns, blinks. Any one is enough, and their absence is never a failure, since a
-live person can sit still and not blink.
-
-Light detection only include deny cues. Heavy detection includes both deny and confirm cues.
-
-### Face Lab
-
-Face Lab is a hidden debug console to test face recognition and liveness detection with real values.
-
-**To open it:** Settings → About, then click the app icon 5 times. A
-debug section should appear in the sidebar.
-
----
-
-
-## Building from source
-
-### Prerequisites
-
-- macOS 15+
-- Xcode 26+
-
-
-
-### Installation
-
-1. Clone repository:
-  ```bash
-   git clone https://github.com/jonnyoo/glance.git
-   cd glance
-  ```
-2. Open in Xcode:
-  ```bash
-   open glance/glance.xcodeproj
-  ```
-3. Run the project:
-  - Click `run` or press `Cmd + R`.
-
-
-
-## Contributing
-
-Not currently accepting PRs. Feel free to fork this project.
-
-App feedback goes to [tryglance.app/feedback](https://tryglance.app/feedback).
-
-## Acknowledgements
-
-- **[The Boring Notch](https://github.com/TheBoredTeam/boring.notch)** — for the notch window
-physics.
-- **[InsightFace](https://github.com/deepinsight/insightface)** — the ArcFace model doing the
- recognition.
-
-
-
-## License
-
-[MIT](LICENSE) © Jonathan Zhou
+[MIT](LICENSE) © Jonathan Zhou. Original license retained.

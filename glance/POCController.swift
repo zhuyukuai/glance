@@ -86,37 +86,39 @@ final class POCController {
 
     // MARK: - Injection
 
-    /// Reads + decrypts + injects the stored password, zeroing the plaintext
-    /// buffer before returning. When `requireAuthoritativeLock` is true (the
-    /// auto-trigger path), refuses to inject unless the CGSession dictionary
-    /// confirms the screen is actually locked.
-    func injectStoredPassword(requireAuthoritativeLock: Bool = false) async {
-        guard KeystrokeInjector.isAccessibilityTrusted() else {
-            statusMessage = "Accessibility not granted — open System Settings and enable glance."
-            return
+    /// Returns true only after a submitted password is followed by an observed unlock.
+    /// All callers must supply a revocable scan token; there is no unguarded injection API.
+    func injectStoredPassword(attempt: UnlockAttempt) async -> Bool {
+        guard !Task.isCancelled, attempt.isValid, KeystrokeInjector.isAccessibilityTrusted(),
+              SecureCredentialManager.isSessionUnlocked,
+              let target = LockScreenTarget.resolve() else {
+            statusMessage = "Skipped: no verified lock-screen input target or authorized session."
+            return false
         }
-        guard SecureCredentialManager.isSessionUnlocked else {
-            statusMessage = "Session locked — authenticate with Touch ID first."
-            return
-        }
-
-        if requireAuthoritativeLock {
-            guard LockMonitor.isScreenActuallyLocked() else {
-                statusMessage = "Skipped: CGSession reports screen is not actually locked."
-                return
-            }
-        }
-
-        statusMessage = "Injecting…"
+        statusMessage = "Entering password…"
         do {
-            try await Task.detached(priority: .userInitiated) {
-                var bytes = try SecureCredentialManager.readPassword()
-                defer { bytes.resetBytes(in: 0..<bytes.count) }
-                try KeystrokeInjector.typeAndReturn(bytes)
-            }.value
-            statusMessage = "Injected stored password + Return at \(Date().formatted(date: .omitted, time: .standard))"
+            try await withTaskCancellationHandler {
+                try await Task.detached(priority: .userInitiated) {
+                    guard attempt.isValid, target.isCurrent else { throw PasswordDeliveryError.invalidContext }
+                    var bytes = try SecureCredentialManager.readPassword()
+                    defer { bytes.resetBytes(in: 0..<bytes.count) }
+                    try KeystrokeInjector.typeAndReturn(bytes, target: target, attempt: attempt)
+                }.value
+            } onCancel: {
+                attempt.cancel()
+            }
+            for _ in 0..<20 {
+                if LockMonitor.isScreenActuallyUnlocked() {
+                    statusMessage = "Unlock observed."
+                    return true
+                }
+                guard !Task.isCancelled, attempt.isValid else { return false }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            statusMessage = "Unlock not confirmed — enter your password manually."
         } catch {
-            statusMessage = "Injection failed: \(error.localizedDescription)"
+            statusMessage = "Password entry stopped — use manual login."
         }
+        return false
     }
 }

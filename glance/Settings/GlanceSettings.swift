@@ -11,25 +11,25 @@ import Observation
 
 /// How long the Touch-ID-unlocked session may sit idle before it re-locks.
 enum AutoLockInterval: Int, CaseIterable, Identifiable {
-    case oneDay = 1
-    case sevenDays = 7
-    case fourteenDays = 14
-    case thirtyDays = 30
+    case fifteenMinutes = 900
+    case oneHour = 3600
+    case fourHours = 14400
+    case eightHours = 28800
 
     var id: Int { rawValue }
-
-    var title: String { rawValue == 1 ? "1 day" : "\(rawValue) days" }
-
-    var duration: TimeInterval { TimeInterval(rawValue) * 24 * 60 * 60 }
-
-    /// Position in `allCases`, used to drive the discrete 4-stop slider.
-    var sliderIndex: Double {
-        Double(Self.allCases.firstIndex(of: self) ?? 0)
+    var title: String {
+        switch self {
+        case .fifteenMinutes: return "15 minutes"
+        case .oneHour: return "1 hour"
+        case .fourHours: return "4 hours"
+        case .eightHours: return "8 hours"
+        }
     }
-
+    var duration: TimeInterval { TimeInterval(rawValue) }
+    var sliderIndex: Double { Double(Self.allCases.firstIndex(of: self) ?? 1) }
     static func from(sliderIndex: Double) -> AutoLockInterval {
-        let clamped = Int(sliderIndex.rounded())
-        return allCases.indices.contains(clamped) ? allCases[clamped] : .sevenDays
+        let index = Int(sliderIndex.rounded())
+        return allCases.indices.contains(index) ? allCases[index] : .oneHour
     }
 }
 
@@ -106,7 +106,7 @@ final class GlanceSettings {
         static let hapticFeedbackEnabled = "GlanceSettings.hapticFeedbackEnabled"
         static let preferredDisplayID = "GlanceSettings.preferredDisplayID"
         static let preferredDisplayName = "GlanceSettings.preferredDisplayName"
-        static let autoLockIntervalDays = "GlanceSettings.autoLockIntervalDays"
+        static let autoLockIntervalSeconds = "GlanceSettings.autoLockIntervalSeconds"
         static let defaultCameraID = "GlanceSettings.defaultCameraID"
         static let builtInDisplayCameraID = "GlanceSettings.builtInDisplayCameraID"
         static let externalDisplayCameraID = "GlanceSettings.externalDisplayCameraID"
@@ -199,7 +199,7 @@ final class GlanceSettings {
         didSet { defaults.set(hapticFeedbackEnabled, forKey: Key.hapticFeedbackEnabled) }
     }
 
-    static let faceDetectionRange = 3...10
+    static let faceDetectionRange = 8...20
 
     /// Which display Face Unlock shows on. `nil` means `NotchGeometry.preferredScreen()`'s
     /// default, re-evaluated live; a pinned display has deliberately no
@@ -212,10 +212,12 @@ final class GlanceSettings {
     var preferredDisplayName: String? {
         didSet { defaults.set(preferredDisplayName, forKey: Key.preferredDisplayName) }
     }
-    /// Enforced by `SessionAutoLocker`, not here — this is only the stored
-    /// preference.
+    /// Applied to the credential manager; the timer only refreshes the UI.
     var autoLockInterval: AutoLockInterval {
-        didSet { defaults.set(autoLockInterval.rawValue, forKey: Key.autoLockIntervalDays) }
+        didSet {
+            defaults.set(autoLockInterval.rawValue, forKey: Key.autoLockIntervalSeconds)
+            SecureCredentialManager.setIdleTimeout(autoLockInterval.duration)
+        }
     }
     /// Device `uniqueID`s, not device objects — devices can disconnect/
     /// reconnect between launches, but their unique ID is stable.
@@ -298,16 +300,16 @@ final class GlanceSettings {
         retryOnHover = defaults.object(forKey: Key.retryOnHover) as? Bool ?? true
         faceDetectionSeconds = (defaults.object(forKey: Key.faceDetectionSeconds) as? Int)
             .map { min(max($0, Self.faceDetectionRange.lowerBound), Self.faceDetectionRange.upperBound) }
-            ?? 5
+            ?? 15
         autoRetryOnce = defaults.object(forKey: Key.autoRetryOnce) as? Bool ?? false
         hapticFeedbackEnabled = defaults.object(forKey: Key.hapticFeedbackEnabled) as? Bool ?? true
         preferredDisplayID = defaults.string(forKey: Key.preferredDisplayID)
         preferredDisplayName = defaults.string(forKey: Key.preferredDisplayName)
 
-        // Defaults to 7 days — long enough not to nag daily users, short
-        // enough not to leave an abandoned session live indefinitely.
-        autoLockInterval = (defaults.object(forKey: Key.autoLockIntervalDays) as? Int)
-            .flatMap(AutoLockInterval.init(rawValue:)) ?? .sevenDays
+        // A new seconds key intentionally migrates legacy day-long sessions to one hour.
+        // A separate eight-hour authorization limit is enforced on every key access.
+        autoLockInterval = (defaults.object(forKey: Key.autoLockIntervalSeconds) as? Int)
+            .flatMap(AutoLockInterval.init(rawValue:)) ?? .oneHour
         defaultCameraID = defaults.string(forKey: Key.defaultCameraID)
         builtInDisplayCameraID = defaults.string(forKey: Key.builtInDisplayCameraID)
         externalDisplayCameraID = defaults.string(forKey: Key.externalDisplayCameraID)
@@ -319,6 +321,7 @@ final class GlanceSettings {
 
         // Push into the nonisolated mirror immediately, or FaceRecognitionPipeline
         // would keep its own default until the slider is first touched.
+        SecureCredentialManager.setIdleTimeout(autoLockInterval.duration)
         FaceRecognitionPipeline.minimumProminentFaceWidth = minimumFaceWidth
     }
 }

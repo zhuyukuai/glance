@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - 'feat/**'
+      - 'codex/**'
   pull_request:
     branches:
       - main
@@ -49,31 +50,21 @@ jobs:
             exit 1
           fi
 
-          echo 'Offline runtime audit passed.'
+          if grep -nE 'Sparkle|XCRemoteSwiftPackageReference' glance.xcodeproj/project.pbxproj; then
+            echo 'Unexpected remote package dependency in the offline build.'
+            exit 1
+          fi
 
-      - name: Run liveness security self-tests
-        shell: bash
-        run: |
-          set -euo pipefail
+          if grep -nE '\.post\(tap:|CGEventPost\(' glance/KeystrokeInjector.swift; then
+            echo 'Global keyboard posting must not be used for password delivery.'
+            exit 1
+          fi
 
-          COMMON_LIVENESS_SOURCES=(
-            glance/Liveness/LandmarkGeometry.swift
-            glance/Liveness/GeometryLiveness.swift
-            glance/Liveness/GlareCue.swift
-            glance/Liveness/LivenessCues.swift
-            glance/Liveness/LivenessScoring.swift
-          )
+          echo 'Offline source audit passed (not an OS-enforced network sandbox).'
 
-          swiftc -O -o "$RUNNER_TEMP/liveness_selftest" \
-            "${COMMON_LIVENESS_SOURCES[@]}" \
-            glance/Liveness/LivenessAnalyzer.swift \
-            tools/liveness_selftest.swift
-          "$RUNNER_TEMP/liveness_selftest"
 
-          swiftc -O -o "$RUNNER_TEMP/replay_challenge_selftest" \
-            "${COMMON_LIVENESS_SOURCES[@]}" \
-            tools/replay_challenge_selftest.swift
-          "$RUNNER_TEMP/replay_challenge_selftest"
+      - name: Run security regression tests
+        run: bash tools/run_security_tests.sh
 
       - name: Show Xcode version
         run: xcodebuild -version
@@ -87,6 +78,48 @@ jobs:
             -configuration Debug \
             -destination 'platform=macOS' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            ARCHS='arm64 x86_64' \
+            ONLY_ACTIVE_ARCH=NO \
+            ENABLE_DEBUG_DYLIB=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
+
+      - name: Package local test build
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/DerivedData/Build/Products/Debug/glance.app"
+          mkdir -p test-package
+          # Ad-hoc signing supports local testing, not distribution trust or notarization.
+          # No provisioned keychain sharing group is available on the CI runner.
+          cat > "$RUNNER_TEMP/test.entitlements" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict><key>com.apple.security.device.camera</key><true/></dict></plist>
+          PLIST
+          codesign --force --sign - --options runtime --entitlements "$RUNNER_TEMP/test.entitlements" "$app"
+          codesign --verify --deep --strict "$app"
+          lipo "$app/Contents/MacOS/glance" -verify_arch arm64
+          lipo "$app/Contents/MacOS/glance" -verify_arch x86_64
+          ditto -c -k --sequesterRsrc --keepParent "$app" test-package/glance-test-universal.zip
+          git rev-parse HEAD > test-package/SOURCE_COMMIT.txt
+          (cd test-package && shasum -a 256 glance-test-universal.zip > SHA256SUMS)
+          cat > test-package/READ-ME.txt <<'NOTE'
+          Local test build only. Ad-hoc signed; not Developer ID signed or notarized.
+          Includes Apple Silicon and Intel binaries. Requires macOS 15 or later.
+          The test signature has camera access but no provisioned keychain sharing group.
+          Use a disposable macOS account for password and lock-screen testing.
+          Grant permissions yourself through macOS. Never disable Gatekeeper or SIP.
+          Hardware acceptance testing is still required; see docs/security-testing.md.
+          NOTE
+
+      - name: Upload local test package
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: glance-test-universal
+          path: test-package/
+          if-no-files-found: error
+          retention-days: 7
