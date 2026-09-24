@@ -101,7 +101,8 @@ jobs:
           PLIST
           codesign --force --sign - --options runtime --entitlements "$RUNNER_TEMP/test.entitlements" "$app"
           codesign --verify --deep --strict "$app"
-          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/glance"
+          lipo "$app/Contents/MacOS/glance" -verify_arch arm64
+          lipo "$app/Contents/MacOS/glance" -verify_arch x86_64
           ditto -c -k --sequesterRsrc --keepParent "$app" test-package/glance-test-universal.zip
           git rev-parse HEAD > test-package/SOURCE_COMMIT.txt
           (cd test-package && shasum -a 256 glance-test-universal.zip > SHA256SUMS)
