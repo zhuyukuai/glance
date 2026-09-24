@@ -19,9 +19,12 @@ Requirements: macOS 15+, Apple Silicon or Intel, a macOS-supported camera, and *
 Command Line Tools alone cannot build the complete application. The source supports built-in, external,
 and Continuity cameras, but individual cameras and OS versions still require testing.
 
-**No prebuilt release of this hardened fork is currently provided.** An upstream Glance DMG is not a build
-of this fork and must not be used as a substitute. Clone this repository and select the reviewed commit
-or branch before building:
+**No notarized release of this hardened fork is currently provided.** Successful push builds in
+[Actions](https://github.com/zhuyukuai/glance/actions) provide a seven-day `glance-test-universal`
+artifact for hardware testing. It contains an ad-hoc signed app, its source commit and SHA-256 checksum.
+This test signature has camera access but no provisioned keychain sharing group; use a disposable macOS
+account. An upstream Glance DMG is not a build of this fork. To build locally, select the reviewed commit
+or branch:
 
 ```bash
 git clone https://github.com/zhuyukuai/glance.git
@@ -36,10 +39,12 @@ around a failed lock-screen test.
 
 Build and run, then:
 
-1. Grant **Camera** access and select the intended physical camera in Settings.
-2. Enroll your face. Use Face Lab first to check detection, lighting, pose direction and recognition.
-3. For password delivery, grant **Accessibility**, authorize a credential session with Touch ID or the
-   device password, and save the password for the **currently signed-in account**.
+1. Start in a disposable macOS account. The first-run flow requires **Camera** and **Accessibility**
+   permissions, face enrollment and a saved password before full Settings and Face Lab become available.
+2. Follow enrollment, authorize a credential session using the system prompt, and save only the password
+   for the **currently signed-in test account**. Do not put your primary account's password into a test build.
+3. In Settings, select the intended physical camera. Use Face Lab to check detection, lighting, pose
+   direction and recognition. Before first-run setup, QuickTime can check camera preview without credentials.
 4. If enabling the optional space-key trigger, grant **Input Monitoring** separately.
 5. Lock the test account, keep your face still until prompted, and perform each requested action.
 

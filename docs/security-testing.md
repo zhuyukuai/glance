@@ -37,9 +37,11 @@ app commit and signing identity; never record the password. Keep a working manua
 1. Build the exact reviewed commit with full Xcode and a stable signing identity. Verify model loading;
    the actual unlock path must stop if the ArcFace model falls back. Verify a missing/disconnected
    selected camera stops scanning rather than unexpectedly switching to another input.
-2. Enroll and test in Face Lab before saving a password. Check left/right mapping with both built-in
-   and external cameras; check glasses, glare, different lighting and typical distances. Deliberately
-   perform the wrong action and an action before its prompt. The UI must report a failed scan.
+2. First-run setup requires permissions, enrollment and a saved password before Face Lab is available.
+   Complete it only in the disposable account, using that account's password. Check the camera without
+   credentials in QuickTime beforehand if needed. Then use Face Lab to check recognition, glasses, glare,
+   lighting and distance. Check left/right challenge mapping and deliberate wrong or premature actions
+   during the test account's lock-screen scans; Face Lab does not display the lock-screen challenge prompts.
 3. Test printed photos, still images on several displays, ordinary recorded videos, a repeated
    blink/mouth/turn recording, neutral-padded versions, different replay start offsets and speeds,
    and deliberate identity switching/occlusion. Any successful spoof is a deployment blocker.
