@@ -79,7 +79,7 @@ struct RecognitionSettingsPage: View {
                 SettingsGroup {
                     SettingsRowContent(
                         title: "Replay challenge",
-                        info: "Every Face Unlock requires two random actions, selected from blinking, opening your mouth, and turning your head. Actions only count after their prompt appears."
+                        info: "Every Face Unlock requires three random actions. Look forward and hold still before each prompt, then perform only the requested action and return to neutral. Wrong actions, tracking loss, or timeouts stop the scan."
                     ) {
                         Text("Required")
                             .font(.system(size: 11, weight: .semibold))

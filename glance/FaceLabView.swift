@@ -256,6 +256,8 @@ struct FaceLabView: View {
                 return (.secondary, "Pending — nothing decided yet")
             case .confirmed(let cue):
                 return (.green, cue.map { "Live — confirmed by \($0.title)" } ?? "Live — auto-confirmed (Light mode)")
+            case .challengeFailed:
+                return (.red, "Challenge failed — reset and try again")
             case .denied(let cue):
                 return (.red, "Spoof — denied by \(cue.title)")
             }

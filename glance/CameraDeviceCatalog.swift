@@ -33,7 +33,7 @@ enum CameraDeviceCatalog {
         return CGDisplayIsBuiltin(screenNumber) != 0
     }
 
-    /// Display-specific override, then flat default, then the system default camera.
+    /// Use the selected camera or fail closed if it disappears. System default is used only before selection.
     @MainActor
     static func resolvedDevice() -> AVCaptureDevice? {
         let settings = GlanceSettings.shared
@@ -41,8 +41,8 @@ enum CameraDeviceCatalog {
             ? (settings.builtInDisplayCameraID ?? settings.defaultCameraID)
             : (settings.externalDisplayCameraID ?? settings.defaultCameraID)
 
-        if let preferredID, let device = AVCaptureDevice(uniqueID: preferredID) {
-            return device
+        if let preferredID {
+            return AVCaptureDevice(uniqueID: preferredID)
         }
         return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
             ?? AVCaptureDevice.default(for: .video)

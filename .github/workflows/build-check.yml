@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - 'feat/**'
+      - 'codex/**'
   pull_request:
     branches:
       - main
@@ -49,31 +50,21 @@ jobs:
             exit 1
           fi
 
-          echo 'Offline runtime audit passed.'
+          if grep -nE 'Sparkle|XCRemoteSwiftPackageReference' glance.xcodeproj/project.pbxproj; then
+            echo 'Unexpected remote package dependency in the offline build.'
+            exit 1
+          fi
 
-      - name: Run liveness security self-tests
-        shell: bash
-        run: |
-          set -euo pipefail
+          if grep -nE '\.post\(tap:|CGEventPost\(' glance/KeystrokeInjector.swift; then
+            echo 'Global keyboard posting must not be used for password delivery.'
+            exit 1
+          fi
 
-          COMMON_LIVENESS_SOURCES=(
-            glance/Liveness/LandmarkGeometry.swift
-            glance/Liveness/GeometryLiveness.swift
-            glance/Liveness/GlareCue.swift
-            glance/Liveness/LivenessCues.swift
-            glance/Liveness/LivenessScoring.swift
-          )
+          echo 'Offline source audit passed (not an OS-enforced network sandbox).'
 
-          swiftc -O -o "$RUNNER_TEMP/liveness_selftest" \
-            "${COMMON_LIVENESS_SOURCES[@]}" \
-            glance/Liveness/LivenessAnalyzer.swift \
-            tools/liveness_selftest.swift
-          "$RUNNER_TEMP/liveness_selftest"
 
-          swiftc -O -o "$RUNNER_TEMP/replay_challenge_selftest" \
-            "${COMMON_LIVENESS_SOURCES[@]}" \
-            tools/replay_challenge_selftest.swift
-          "$RUNNER_TEMP/replay_challenge_selftest"
+      - name: Run security regression tests
+        run: bash tools/run_security_tests.sh
 
       - name: Show Xcode version
         run: xcodebuild -version

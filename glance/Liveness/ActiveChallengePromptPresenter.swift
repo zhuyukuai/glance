@@ -17,23 +17,28 @@ final class ActiveChallengePromptPresenter: NSObject {
     private let windowController = NotchWindowController()
     private let hostingView = NSHostingView(rootView: ChallengePromptView(prompt: ""))
 
+    private var activeScan: UUID?
+
     private override init() {
         super.init()
         windowController.contentView = hostingView
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(promptDidChange(_:)),
-            name: .activeLivenessChallengePromptDidChange,
-            object: nil
-        )
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
+    func begin(scanID: UUID) {
+        windowController.hide()
+        activeScan = scanID
     }
 
-    @objc private func promptDidChange(_ notification: Notification) {
-        guard let prompt = notification.object as? String, !prompt.isEmpty else {
+    func end(scanID: UUID) {
+        guard activeScan == scanID else { return }
+        activeScan = nil
+        windowController.hide()
+    }
+
+    func update(_ prompt: String?, scanID: UUID) {
+        // Late callbacks or cleanup from a cancelled scan cannot overwrite a newer scan.
+        guard activeScan == scanID else { return }
+        guard LockMonitor.isScreenActuallyLocked(), let prompt, !prompt.isEmpty else {
             windowController.hide()
             return
         }
@@ -41,6 +46,7 @@ final class ActiveChallengePromptPresenter: NSObject {
         windowController.show()
         windowController.displaySynchronously()
     }
+
 }
 
 private struct ChallengePromptView: View {

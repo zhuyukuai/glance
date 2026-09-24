@@ -123,6 +123,8 @@ struct PasswordSettingsPage: View {
                 }
             }
 
+            SettingsCaption(text: "Idle sessions lock after the selected interval. Authenticate again at least every 8 hours, even with regular face unlocks.")
+
             if let statusMessage {
                 SettingsCaption(text: statusMessage)
             }

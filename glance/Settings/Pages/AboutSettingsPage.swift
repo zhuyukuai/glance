@@ -44,7 +44,7 @@ struct AboutSettingsPage: View {
                 .font(.system(size: 12))
                 .foregroundStyle(SettingsMetrics.textSecondary)
 
-            Text("Strict offline mode")
+            Text("Offline build · automatic updates disabled")
                 .font(.system(size: 11))
                 .foregroundStyle(SettingsMetrics.textSecondary)
                 .padding(.top, 8)
